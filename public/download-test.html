@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Download Test</title>
+</head>
+<body>
+    <h1>Download Attribute Test</h1>
+    
+    <h2>Test 1: Direct Blob Download</h2>
+    <button onclick="test1()">Test Blob Download with Filename</button>
+    
+    <h2>Test 2: Manual Link</h2>
+    <a id="manualLink" href="#" download="test-manual-download.txt">Right-click and "Save Link As..."</a>
+    
+    <script>
+        function test1() {
+            // Create a simple text blob
+            const blob = new Blob(['Hello World'], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            
+            // Create anchor and trigger download
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'test-programmatic-download.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            console.log('Download triggered with filename:', a.download);
+        }
+        
+        // Setup manual link
+        const blob2 = new Blob(['Manual Download Test'], { type: 'text/plain' });
+        const url2 = URL.createObjectURL(blob2);
+        document.getElementById('manualLink').href = url2;
+    </script>
+</body>
+</html>

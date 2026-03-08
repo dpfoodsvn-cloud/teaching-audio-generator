@@ -1,0 +1,33 @@
+<html>
+<body>
+<button id="btn">Download 3 Files</button>
+<div id="status">Ready</div>
+<script>
+const downloadBlob = (blob, filename) => {
+    console.log('Downloading', filename);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        console.log('Revoked', filename);
+    }, 1000);
+};
+
+document.getElementById('btn').onclick = async () => {
+    document.getElementById('status').innerText = 'Downloading...';
+    for (let i = 0; i < 3; i++) {
+        const blob = new Blob(['test content ' + i], { type: 'text/plain' });
+        downloadBlob(blob, `test_${i}.txt`);
+        await new Promise(r => setTimeout(r, 500)); // Simulate processing time
+    }
+    document.getElementById('status').innerText = 'Done';
+};
+</script>
+</body>
+</html>
