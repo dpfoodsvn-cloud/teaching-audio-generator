@@ -307,10 +307,27 @@ class ScriptParser {
                     continue;
                 }
                 
-                // Skip lines before the first Audio header (document titles, metadata)
+                // If no Audio header found yet, check if this looks like dialogue.
+                // If so, bootstrap a default segment and start capturing immediately.
                 if (!foundFirstAudio) {
-                    console.log('[Parser] Skipping pre-audio line:', trimmed.substring(0, 60));
-                    continue;
+                    const isDialogue = /^[A-Za-z][A-Za-z\s.]{0,29}:\s*.+$/.test(trimmed);
+                    const isNarration = trimmed.length > 10 && !trimmed.startsWith('#') && !trimmed.startsWith('*');
+                    if (isDialogue || isNarration) {
+                        // Auto-create a default segment and start capturing
+                        foundFirstAudio = true;
+                        currentSegment = {
+                            id: 'pasted-script',
+                            section: '',
+                            name: 'Pasted Script',
+                            lines: [],
+                            status: 'pending'
+                        };
+                        console.log('[Parser] No Audio header found — auto-starting default segment');
+                        // Fall through to capture this line below
+                    } else {
+                        console.log('[Parser] Skipping pre-audio line:', trimmed.substring(0, 60));
+                        continue;
+                    }
                 }
                 
                 // If no segment started yet (shouldn't happen after foundFirstAudio),
