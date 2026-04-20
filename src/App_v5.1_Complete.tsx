@@ -122,64 +122,6 @@ const parseSpeakerGenders = (speakerLine: string): { genders: Record<string, 'ma
     return { genders };
 };
 
-// ─── v5.3 Inline Emotion Tag System ───────────────────────────────────────
-// Writers prefix dialogue lines with [emotion] tags.
-// Example: Teacher: [cheerful] Good morning!
-// Tags are stripped before display and converted to SSML at generation time.
-
-const EMOTION_STYLE_MAP: Record<string, string> = {
-    cheerful: 'cheerful',
-    excited: 'excited',
-    serious: 'general',
-    sad: 'sad',
-    angry: 'angry',
-    whisper: 'whispering',
-    whispering: 'whispering',
-    hopeful: 'hopeful',
-    terrified: 'terrified',
-    empathetic: 'empathetic',
-    calm: 'calm',
-    lyrical: 'lyrical',
-};
-
-const PROSODY_TAG_MAP: Record<string, string> = {
-    slow: 'rate="-25%"',
-    veryslow: 'rate="-40%"',
-    fast: 'rate="+30%"',
-    veryfast: 'rate="+50%"',
-    loud: 'volume="+30%"',
-    quiet: 'volume="-30%"',
-    high: 'pitch="+30Hz"',
-    low: 'pitch="-30Hz"',
-};
-
-/**
- * Extract the first [emotion] tag from a line of text.
- * Returns { tag, cleanText } where cleanText has the tag stripped.
- */
-const extractEmotionTag = (text: string): { tag: string | null; cleanText: string } => {
-    const match = text.match(/^\[([a-zA-Z]+)\]\s*/);
-    if (!match) return { tag: null, cleanText: text };
-    return { tag: match[1].toLowerCase(), cleanText: text.slice(match[0].length) };
-};
-
-/**
- * Wrap text with the appropriate SSML tag based on the emotion.
- * Returns plain text if no mapping found (graceful fallback).
- */
-const applyEmotionSSML = (text: string, emotionTag: string, voice: string): string => {
-    if (EMOTION_STYLE_MAP[emotionTag]) {
-        const style = EMOTION_STYLE_MAP[emotionTag];
-        return `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US"><voice name="${voice}"><mstts:express-as style="${style}">${text}</mstts:express-as></voice></speak>`;
-    }
-    if (PROSODY_TAG_MAP[emotionTag]) {
-        const attrs = PROSODY_TAG_MAP[emotionTag];
-        return `<prosody ${attrs}>${text}</prosody>`;
-    }
-    return text;
-};
-// ───────────────────────────────────────────────────────────────────────────
-
 // Inline Script Parser
 class ScriptParser {
     static parse(content: string): ScriptSegment[] {
@@ -521,7 +463,6 @@ function App() {
     const [singleStatus, setSingleStatus] = useState('Paste a single script segment to generate');
     const [singleSpeakers, setSingleSpeakers] = useState<string[]>([]);
     const [singleVoiceMapping, setSingleVoiceMapping] = useState<Record<string, string>>({});
-    const [voiceTuning, setVoiceTuning] = useState<Record<string, {pitch: number; rate: number}>>({});
     const [singleAudioData, setSingleAudioData] = useState<Blob | null>(null);
     const [singleFilename, setSingleFilename] = useState<string>('');
 
@@ -698,8 +639,9 @@ function App() {
                 if (JSON.stringify(speakerList) !== JSON.stringify(singleSpeakers)) {
                     setSingleSpeakers(speakerList);
 
-                    // Auto-assign voices (round-robin per gender)
+                    // Auto-assign voices
                     const newMapping: Record<string, string> = { ...singleVoiceMapping };
+                    const usedVoices = new Set<string>(Object.values(newMapping));
                     let maleCounter = 0;
                     let femaleCounter = 0;
                     let neutralCounter = 0;
@@ -707,21 +649,28 @@ function App() {
                     speakerList.forEach(speaker => {
                         if (!newMapping[speaker]) {
                             const gender = detectGender(speaker);
-                            let pool = gender === 'female' ? FEMALE_VOICES : gender === 'male' ? MALE_VOICES : voices;
-                            if (pool.length === 0) pool = voices;
+                            let candidates: string[] = [];
 
-                            let assignedVoice: string;
-                            if (gender === 'female') {
-                                assignedVoice = pool[femaleCounter % pool.length];
-                                femaleCounter++;
-                            } else if (gender === 'male') {
-                                assignedVoice = pool[maleCounter % pool.length];
-                                maleCounter++;
-                            } else {
-                                assignedVoice = pool[neutralCounter % pool.length];
-                                neutralCounter++;
+                            if (gender === 'female') candidates = FEMALE_VOICES;
+                            else if (gender === 'male') candidates = MALE_VOICES;
+                            else candidates = voices;
+
+                            let assignedVoice = candidates.find(v => !usedVoices.has(v));
+
+                            if (!assignedVoice) {
+                                if (gender === 'female') {
+                                    assignedVoice = FEMALE_VOICES[femaleCounter % FEMALE_VOICES.length];
+                                    femaleCounter++;
+                                } else if (gender === 'male') {
+                                    assignedVoice = MALE_VOICES[maleCounter % MALE_VOICES.length];
+                                    maleCounter++;
+                                } else {
+                                    assignedVoice = voices[neutralCounter % voices.length];
+                                    neutralCounter++;
+                                }
                             }
                             newMapping[speaker] = assignedVoice;
+                            usedVoices.add(assignedVoice);
                         }
                     });
                     setSingleVoiceMapping(newMapping);
@@ -885,6 +834,7 @@ function App() {
         setSpeakers(speakerList);
 
         const initialMapping: Record<string, string> = {};
+        const usedVoices = new Set<string>();
         let maleCounter = 0;
         let femaleCounter = 0;
         let neutralCounter = 0;
@@ -899,24 +849,31 @@ function App() {
         console.log('[Voice Assignment - Batch Paste] Collected parsed genders:', parsedGenders);
 
         speakerList.forEach((speaker) => {
+            // Use parsed gender from segment if available, otherwise detect from name
             const gender = parsedGenders[speaker] || detectGender(speaker);
             console.log('[Voice Assignment - Batch Paste] Speaker:', speaker, '->', gender, parsedGenders[speaker] ? '(parsed)' : '(detected)');
+            let candidates: string[] = [];
 
-            let pool = gender === 'female' ? FEMALE_VOICES : gender === 'male' ? MALE_VOICES : voices;
-            if (pool.length === 0) pool = voices;
+            if (gender === 'female') candidates = FEMALE_VOICES;
+            else if (gender === 'male') candidates = MALE_VOICES;
+            else candidates = voices;
 
-            let assignedVoice: string;
-            if (gender === 'female') {
-                assignedVoice = pool[femaleCounter % pool.length];
-                femaleCounter++;
-            } else if (gender === 'male') {
-                assignedVoice = pool[maleCounter % pool.length];
-                maleCounter++;
-            } else {
-                assignedVoice = pool[neutralCounter % pool.length];
-                neutralCounter++;
+            let assignedVoice = candidates.find(v => !usedVoices.has(v));
+
+            if (!assignedVoice) {
+                if (gender === 'female') {
+                    assignedVoice = FEMALE_VOICES[femaleCounter % FEMALE_VOICES.length];
+                    femaleCounter++;
+                } else if (gender === 'male') {
+                    assignedVoice = MALE_VOICES[maleCounter % MALE_VOICES.length];
+                    maleCounter++;
+                } else {
+                    assignedVoice = voices[neutralCounter % voices.length];
+                    neutralCounter++;
+                }
             }
 
+            usedVoices.add(assignedVoice);
             initialMapping[speaker] = assignedVoice;
         });
 
@@ -1097,24 +1054,10 @@ function App() {
 
                     for (const line of segment.lines) {
                         const speakerVoice = voiceMapping[line.speaker] || voices[0];
-                        const tuning = voiceTuning[line.speaker];
-                        // Check for inline emotion tag on the raw (pre-sanitized) line text
-                        const { tag: emotionTag, cleanText: cleanLineText } = extractEmotionTag(line.text);
-                        let textToSpeak = cleanLineText;
-
-                        // Apply emotion SSML if tag found
-                        if (emotionTag) {
-                            textToSpeak = applyEmotionSSML(cleanLineText, emotionTag, speakerVoice);
-                        } else if (tuning && (tuning.pitch !== 0 || tuning.rate !== 0)) {
-                            // Otherwise apply manual sliders
-                            const pitchStr = (tuning.pitch >= 0 ? '+' : '') + tuning.pitch + 'Hz';
-                            const rateStr = (tuning.rate >= 0 ? '+' : '') + tuning.rate + '%';
-                            textToSpeak = `<prosody pitch="${pitchStr}" rate="${rateStr}">${cleanLineText}</prosody>`;
-                        }
 
                         const engine = engineRegistry.getEngine(selectedEngineId);
                         const audioBlob = await engine.generateAudio(
-                            textToSpeak,
+                            line.text,
                             speakerVoice,
                             {
                                 apiKey: apiKeysList[0],
@@ -1213,14 +1156,13 @@ function App() {
 
         const zipBlob = await zip.generateAsync({ type: 'blob' });
         let outputName = fileName || 'Teaching_Audio';
-        if (completedSegments.length > 0) {
+        if (outputName === 'Pasted_Script' && completedSegments.length > 0) {
             const firstSeg = completedSegments[0];
-            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(firstSeg.id);
-            if (!isUUID && firstSeg.id) {
-                // Use script ID (e.g. WB_E9_U12) as ZIP name
-                outputName = firstSeg.id.replace(/[^a-zA-Z0-9-_]/g, '_');
-            } else if (outputName === 'Pasted_Script') {
-                outputName = 'Teaching_Audio';
+            const section = firstSeg.section ? firstSeg.section.replace(/[^a-zA-Z0-9-_]/g, '_') : '';
+            if (section) {
+                outputName = `${section}_Script`;
+            } else if (firstSeg.id && firstSeg.id !== 'segment-1') {
+                outputName = `${firstSeg.id.replace(/[^a-zA-Z0-9-_]/g, '_')}_Script`;
             }
         }
         await saveFile(zipBlob, `${outputName}.zip`);
@@ -1277,7 +1219,7 @@ function App() {
         <div className="app">
             <header className="app-header">
                 <div className="container">
-                    <h1 className="app-title">Teaching Audio Generator <span style={{ fontSize: '0.6em', opacity: 0.7 }}>v5.3</span></h1>
+                    <h1 className="app-title">Teaching Audio Generator <span style={{ fontSize: '0.6em', opacity: 0.7 }}>v5.0</span></h1>
                     <p className="app-subtitle">Multi-Speaker Script to Audio — Multi-Engine TTS</p>
                 </div>
             </header>
@@ -1336,11 +1278,7 @@ function App() {
                                 }}
                             >
                                 <option value="all">🌐 All Languages</option>
-                                <option value="en">🇬🇧 English (All Accents)</option>
-                                <option value="en-US">🇺🇸 English (US/American)</option>
-                                <option value="en-GB">🇬🇧 English (UK/British)</option>
-                                <option value="en-AU">🇦🇺 English (Australian)</option>
-                                <option value="en-IN">🇮🇳 English (Indian)</option>
+                                <option value="en">🇬🇧 English</option>
                                 <option value="vi">🇻🇳 Vietnamese</option>
                                 <option value="ja">🇯🇵 Japanese</option>
                                 <option value="ko">🇰🇷 Korean</option>
@@ -1558,24 +1496,6 @@ function App() {
                                                             </select>
                                                             <VoicePreviewButton voice={singleVoiceMapping[speaker] || voices[0]} />
                                                         </div>
-                                                        <div style={{ display: 'flex', gap: '10px', fontSize: '11px', color: '#888' }}>
-                                                            <label style={{ flex: 1 }}>
-                                                                Pitch: {(voiceTuning[speaker]?.pitch ?? 0) > 0 ? '+' : ''}{voiceTuning[speaker]?.pitch ?? 0}Hz
-                                                                <input type="range" min="-50" max="50" step="5"
-                                                                    value={voiceTuning[speaker]?.pitch ?? 0}
-                                                                    onChange={(e) => setVoiceTuning(prev => ({ ...prev, [speaker]: { ...prev[speaker], pitch: Number(e.target.value), rate: prev[speaker]?.rate ?? 0 } }))}
-                                                                    style={{ width: '100%', accentColor: '#7c4dff' }}
-                                                                />
-                                                            </label>
-                                                            <label style={{ flex: 1 }}>
-                                                                Rate: {(voiceTuning[speaker]?.rate ?? 0) > 0 ? '+' : ''}{voiceTuning[speaker]?.rate ?? 0}%
-                                                                <input type="range" min="-30" max="30" step="5"
-                                                                    value={voiceTuning[speaker]?.rate ?? 0}
-                                                                    onChange={(e) => setVoiceTuning(prev => ({ ...prev, [speaker]: { ...prev[speaker], rate: Number(e.target.value), pitch: prev[speaker]?.pitch ?? 0 } }))}
-                                                                    style={{ width: '100%', accentColor: '#4caf50' }}
-                                                                />
-                                                            </label>
-                                                        </div>
                                                     </div>
                                                 );
                                             })}
@@ -1651,31 +1571,6 @@ function App() {
                             {batchInputMode === 'paste' ? (
                                 /* Paste Mode */
                                 <div>
-                                    {/* v5.3 Emotion Tag Legend */}
-                                    <details style={{ marginBottom: '10px', padding: '10px', background: '#1a1a2e', borderRadius: '8px', border: '1px solid #333' }}>
-                                        <summary style={{ cursor: 'pointer', color: '#7c4dff', fontWeight: 'bold', fontSize: '13px' }}>🎭 Emotion Tags — Click to expand</summary>
-                                        <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                                            {[
-                                                { tag: 'cheerful', desc: 'Upbeat, bright' },
-                                                { tag: 'excited', desc: 'High energy' },
-                                                { tag: 'serious', desc: 'Authoritative' },
-                                                { tag: 'sad', desc: 'Slower, low' },
-                                                { tag: 'angry', desc: 'Forceful' },
-                                                { tag: 'whisper', desc: 'Breathy, quiet' },
-                                                { tag: 'hopeful', desc: 'Warm, forward' },
-                                                { tag: 'terrified', desc: 'Tense, alarmed' },
-                                                { tag: 'slow', desc: 'Reduced pace' },
-                                                { tag: 'fast', desc: 'Faster pace' },
-                                            ].map(({ tag, desc }) => (
-                                                <span key={tag} title={desc} style={{ padding: '3px 9px', background: '#2a2a3e', border: '1px solid #444', borderRadius: '12px', fontSize: '12px', color: '#b388ff', cursor: 'default', fontFamily: 'monospace' }}>
-                                                    [{tag}]
-                                                </span>
-                                            ))}
-                                        </div>
-                                        <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#666' }}>
-                                            Usage: <code style={{ background: '#222', padding: '2px 6px', borderRadius: '3px' }}>Teacher: [cheerful] Good morning, class!</code>
-                                        </p>
-                                    </details>
                                     <textarea
                                         value={batchScriptText}
                                         onChange={(e) => setBatchScriptText(e.target.value)}

@@ -5,6 +5,14 @@ from pydantic import BaseModel
 import edge_tts
 import uvicorn
 import io
+import xml.sax.saxutils
+
+original_escape = xml.sax.saxutils.escape
+def transparent_escape(data, entities=None):
+    if "<break" in data or "<prosody" in data or "<emphasis" in data or "<voice" in data:
+        return data
+    return original_escape(data, entities)
+xml.sax.saxutils.escape = transparent_escape
 
 app = FastAPI()
 
