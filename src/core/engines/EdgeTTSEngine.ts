@@ -4,7 +4,18 @@ import type { TTSEngine, Voice, EngineConfig } from './TTSEngine';
 const EDGE_VOICES_FALLBACK: Voice[] = [
     { id: 'en-US-AriaNeural', name: 'Aria (US)', gender: 'female', language: 'en-US' },
     { id: 'en-US-GuyNeural', name: 'Guy (US)', gender: 'male', language: 'en-US' },
+    { id: 'en-US-JennyNeural', name: 'Jenny (US)', gender: 'female', language: 'en-US' },
+    { id: 'en-US-MichelleNeural', name: 'Michelle (US)', gender: 'female', language: 'en-US' },
+    { id: 'en-US-ChristopherNeural', name: 'Christopher (US)', gender: 'male', language: 'en-US' },
+    { id: 'en-US-EricNeural', name: 'Eric (US)', gender: 'male', language: 'en-US' },
+    { id: 'en-US-RogerNeural', name: 'Roger (US)', gender: 'male', language: 'en-US' },
+    { id: 'en-US-SteffanNeural', name: 'Steffan (US)', gender: 'male', language: 'en-US' },
     { id: 'en-GB-SoniaNeural', name: 'Sonia (UK)', gender: 'female', language: 'en-GB' },
+    { id: 'en-GB-RyanNeural', name: 'Ryan (UK)', gender: 'male', language: 'en-GB' },
+    { id: 'en-AU-NatashaNeural', name: 'Natasha (AU)', gender: 'female', language: 'en-AU' },
+    { id: 'en-AU-WilliamNeural', name: 'William (AU)', gender: 'male', language: 'en-AU' },
+    { id: 'en-IN-NeerjaNeural', name: 'Neerja (IN)', gender: 'female', language: 'en-IN' },
+    { id: 'en-IN-PrabhatNeural', name: 'Prabhat (IN)', gender: 'male', language: 'en-IN' },
     { id: 'vi-VN-HoaiMyNeural', name: 'Hoài My (VN)', gender: 'female', language: 'vi-VN' },
     { id: 'vi-VN-NamMinhNeural', name: 'Nam Minh (VN)', gender: 'male', language: 'vi-VN' },
     { id: 'ja-JP-NanamiNeural', name: 'Nanami (JP)', gender: 'female', language: 'ja-JP' },
@@ -19,7 +30,7 @@ export class EdgeTTSEngine implements TTSEngine {
     async getVoices(): Promise<Voice[]> {
         try {
             const response = await fetch('http://127.0.0.1:5000/api/edge-tts/voices', {
-                signal: AbortSignal.timeout(3000)
+                signal: AbortSignal.timeout(12000)
             });
             if (response.ok) {
                 const data = await response.json();

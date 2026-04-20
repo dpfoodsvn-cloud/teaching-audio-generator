@@ -244,7 +244,7 @@ class ScriptParser {
 
                 // Audio header — with or without ## / ** prefix
                 // Matches: "Audio 1: Title", "## Audio A1: Title", "**Audio 2: Title"
-                const headerMatch = trimmed.match(/^(?:##\s*|\*\*\s*)?(?:Audio|Script)\s+([A-Za-z0-9]+):\s*(.*)$/i);
+                const headerMatch = trimmed.match(/^(?:##\s*|\*\*\s*)?(?:Audio|Script|Tapescript)\s+([A-Za-z0-9]+):\s*(.*)$/i);
                 if (headerMatch) {
                     foundFirstAudio = true;
                     if (currentSegment && currentSegment.lines.length > 0) {
@@ -294,6 +294,10 @@ class ScriptParser {
                 
                 // Skip extra markdown headers and formatting noise
                 if (trimmed.startsWith('####') || trimmed.match(/^\*\*?Answers?:/i) || trimmed.match(/^\*Script:/i)) continue;
+                // Skip word-count / metadata annotations e.g. "(Approx. 220 words)"
+                if (/^\(Approx\.?\s*\d+\s*words?\)/i.test(trimmed)) continue;
+                // Skip document-level headings that are clearly not dialogue
+                if (/^(?:Audio Script|END-TERM|REVISION|GRADE LEVEL)/i.test(trimmed)) continue;
                 
                 // Detect inline speaker definitions
                 const speakersMatch = trimmed.match(/^(?:\*\*?)?SPEAKERS?\s*:\s*(.+)$/i);
@@ -307,10 +311,27 @@ class ScriptParser {
                     continue;
                 }
                 
-                // Skip lines before the first Audio header (document titles, metadata)
+                // If no Audio header found yet, check if this looks like dialogue.
+                // If so, bootstrap a default segment and start capturing immediately.
                 if (!foundFirstAudio) {
-                    console.log('[Parser] Skipping pre-audio line:', trimmed.substring(0, 60));
-                    continue;
+                    const isDialogue = /^[A-Za-z][A-Za-z\s.]{0,29}:\s*.+$/.test(trimmed);
+                    const isNarration = trimmed.length > 10 && !trimmed.startsWith('#') && !trimmed.startsWith('*');
+                    if (isDialogue || isNarration) {
+                        // Auto-create a default segment and start capturing
+                        foundFirstAudio = true;
+                        currentSegment = {
+                            id: 'pasted-script',
+                            section: '',
+                            name: 'Pasted Script',
+                            lines: [],
+                            status: 'pending'
+                        };
+                        console.log('[Parser] No Audio header found — auto-starting default segment');
+                        // Fall through to capture this line below
+                    } else {
+                        console.log('[Parser] Skipping pre-audio line:', trimmed.substring(0, 60));
+                        continue;
+                    }
                 }
                 
                 // If no segment started yet (shouldn't happen after foundFirstAudio),
@@ -495,12 +516,14 @@ function App() {
     const [apiKey, setApiKey] = useState(() => localStorage.getItem(`tts_apikey_${localStorage.getItem('tts_selected_engine') || 'gemini'}`) || localStorage.getItem('gemini_api_key') || '');
     const [engineVoices, setEngineVoices] = useState<Voice[]>([]);
     const [selectedLanguage, setSelectedLanguage] = useState(() => localStorage.getItem('tts_language') || 'all');
+    const [broadenVoicePool, setBroadenVoicePool] = useState(() => localStorage.getItem('tts_broaden_pool') === 'true');
 
     useEffect(() => {
         localStorage.setItem('tts_language', selectedLanguage);
+        localStorage.setItem('tts_broaden_pool', String(broadenVoicePool));
         voicePreviewCache.current.clear();
         // Removed setVoiceMapping({}); to prevent race condition. The voice validation hook handles it.
-    }, [selectedLanguage]);
+    }, [selectedLanguage, broadenVoicePool]);
     const [temperature, setTemperature] = useState(1.0);
     const [speed, setSpeed] = useState(1.0);
     const [retryDelay, setRetryDelay] = useState(5000);
@@ -564,6 +587,12 @@ function App() {
         if (selectedLanguage === 'all') return true;
         // Keep unknown/multilingual voices for all languages
         if (!v.language || v.language === 'multilingual') return true;
+        
+        // v5.4: Broaden pool logic - if enabled, show all English voices when any English dialect is selected
+        if (broadenVoicePool && selectedLanguage.toLowerCase().startsWith('en-')) {
+            return v.language.toLowerCase().startsWith('en-');
+        }
+        
         return v.language.toLowerCase().startsWith(selectedLanguage.toLowerCase());
     });
 
@@ -605,11 +634,11 @@ function App() {
         if (/^[A-Z]$/.test(trimmedName)) return 'unknown';
 
         const femalePatterns = [
-            /\b(mrs|ms|miss|lady|woman|girl|mother|mom|mum|aunt|grandma|grandmother|sister|daughter|queen|princess|sophie|sarah|mary|jane|lisa|emma|olivia|ava|isabella|mia|charlotte|amelia|harper|evelyn|anna|chloe|mai|lan|hong|linh|kim|hoa|nga|thao|huong|jessica|jennifer|emily|nicole|female|nutritionist|child)\b/,
+            /\b(mrs|ms|miss|lady|woman|girl|mother|mom|mum|aunt|grandma|grandmother|sister|daughter|queen|princess|sophie|sarah|mary|jane|lisa|emma|olivia|ava|isabella|mia|charlotte|amelia|harper|evelyn|anna|chloe|mai|lan|hong|linh|kim|hoa|nga|thao|huong|jessica|jennifer|emily|nicole|female|nutritionist|child|parent|guide|salesperson|assistant|secretary|nurse|receptionist|clerk|customer|visitor)\b/,
             /^(she|her)$/
         ];
         const malePatterns = [
-            /\b(mr|sir|man|boy|father|dad|pop|uncle|grandpa|grandfather|brother|son|king|prince|leo|liam|mark|john|james|robert|michael|william|david|richard|joseph|thomas|charles|ben|tom|peter|paul|george|henry|frank|sam|jack|alex|chris|mike|joe|dan|steve|nick|tim|tony|andrew|kevin|brian|ethan|noah|oliver|jacob|lucas|mason|logan|ryan|nathan|kyle|hung|nam|minh|narrator|interviewer|host|guest|male|teacher|student|speaker)\b/,
+            /\b(mr|sir|man|boy|father|dad|pop|uncle|grandpa|grandfather|brother|son|king|prince|leo|liam|mark|john|james|robert|michael|william|david|richard|joseph|thomas|charles|ben|tom|peter|paul|george|henry|frank|sam|jack|alex|chris|mike|joe|dan|steve|nick|tim|tony|andrew|kevin|brian|ethan|noah|oliver|jacob|lucas|mason|logan|ryan|nathan|kyle|hung|nam|minh|narrator|interviewer|host|guest|male|teacher|student|speaker|pilot|ranger|manager|director|doctor|scientist|expert|officer)\b/,
             /^(he|him)$/
         ];
         if (femalePatterns.some(p => p.test(lowerName))) return 'female';
@@ -1216,9 +1245,16 @@ function App() {
         if (completedSegments.length > 0) {
             const firstSeg = completedSegments[0];
             const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(firstSeg.id);
-            if (!isUUID && firstSeg.id) {
-                // Use script ID (e.g. WB_E9_U12) as ZIP name
+            
+            // v5.5 improved naming
+            const isNumeric = /^\d+$/.test(firstSeg.id);
+            const isDefault = firstSeg.id.includes('segment') || firstSeg.id.includes('pasted');
+
+            if (!isUUID && firstSeg.id && !isNumeric && !isDefault) {
                 outputName = firstSeg.id.replace(/[^a-zA-Z0-9-_]/g, '_');
+            } else if (firstSeg.name) {
+                // Use sanitized name (e.g. Tapescript 1 - Planet Earth)
+                outputName = firstSeg.name.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '_');
             } else if (outputName === 'Pasted_Script') {
                 outputName = 'Teaching_Audio';
             }
@@ -1277,7 +1313,7 @@ function App() {
         <div className="app">
             <header className="app-header">
                 <div className="container">
-                    <h1 className="app-title">Teaching Audio Generator <span style={{ fontSize: '0.6em', opacity: 0.7 }}>v5.3</span></h1>
+                    <h1 className="app-title">Teaching Audio Generator <span style={{ fontSize: '0.6em', opacity: 0.7 }}>v5.5</span></h1>
                     <p className="app-subtitle">Multi-Speaker Script to Audio — Multi-Engine TTS</p>
                 </div>
             </header>
@@ -1349,7 +1385,19 @@ function App() {
                                 <option value="fr">🇫🇷 French</option>
                                 <option value="de">🇩🇪 German</option>
                             </select>
-                            <p style={{ margin: '8px 0 0', fontSize: '0.8em', color: '#666' }}>Filters available voices</p>
+                            <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <input
+                                    type="checkbox"
+                                    id="broaden-pool"
+                                    checked={broadenVoicePool}
+                                    onChange={(e) => setBroadenVoicePool(e.target.checked)}
+                                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                                />
+                                <label htmlFor="broaden-pool" style={{ cursor: 'pointer', fontSize: '0.85em', color: '#bbb' }}>
+                                    Broaden Pool (All English accents)
+                                </label>
+                            </div>
+                            <p style={{ margin: '8px 0 0', fontSize: '0.8em', color: '#aaa' }}>Filters available voices</p>
                         </div>
 
                         {/* Engine Selector */}
@@ -1378,7 +1426,7 @@ function App() {
                                 </button>
                             ))}
                         </div>
-                            <p style={{ margin: '6px 0 0', fontSize: '0.8em', color: '#666' }}>{currentEngine.description}</p>
+                            <p style={{ margin: '6px 0 0', fontSize: '0.8em', color: '#aaa' }}>{currentEngine.description}</p>
                         </div>
                     </div>
 
@@ -1672,7 +1720,7 @@ function App() {
                                                 </span>
                                             ))}
                                         </div>
-                                        <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#666' }}>
+                                        <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#aaa' }}>
                                             Usage: <code style={{ background: '#222', padding: '2px 6px', borderRadius: '3px' }}>Teacher: [cheerful] Good morning, class!</code>
                                         </p>
                                     </details>
